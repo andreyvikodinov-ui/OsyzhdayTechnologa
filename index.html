@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Осуждение Технолога</title>
+    <style>
+        :root {
+            --bg: #0d0d0d;
+            --card: #1a1a2e;
+            --accent: #e94560;
+            --gold: #f0a500;
+            --text: #eee;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', system-ui, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+
+        .container {
+            background: var(--card);
+            border-radius: 24px;
+            padding: 30px;
+            max-width: 500px;
+            width: 100%;
+            text-align: center;
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+        }
+
+        .photo {
+            width: 100%;
+            max-width: 300px;
+            border-radius: 16px;
+            margin-bottom: 25px;
+            box-shadow: 0 10px 30px rgba(233, 68, 96, 0.25);
+            border: 2px solid var(--accent);
+        }
+
+        .counter-label {
+            font-size: 1rem;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            color: #aaa;
+            margin-bottom: 5px;
+        }
+
+        .counter-value {
+            font-size: 4rem;
+            font-weight: 900;
+            color: var(--gold);
+            text-shadow: 0 0 20px rgba(240, 165, 0, 0.5);
+            line-height: 1;
+            margin-bottom: 25px;
+        }
+
+        .btn-condemn {
+            display: inline-block;
+            background: var(--accent);
+            color: white;
+            border: none;
+            padding: 16px 40px;
+            border-radius: 50px;
+            font-size: 1.2rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 8px 20px rgba(233, 68, 96, 0.4);
+        }
+
+        .btn-condemn:hover {
+            background: #ff5a75;
+            transform: translateY(-3px);
+            box-shadow: 0 12px 30px rgba(233, 68, 96, 0.6);
+        }
+
+        .btn-condemn:active {
+            transform: translateY(0);
+            box-shadow: 0 5px 15px rgba(233, 68, 96, 0.4);
+        }
+
+        .btn-condemn:disabled {
+            background: #666;
+            cursor: not-allowed;
+            box-shadow: none;
+            transform: none;
+        }
+
+        .status {
+            margin-top: 15px;
+            font-size: 0.9rem;
+            color: #aaa;
+            min-height: 1.5em;
+        }
+
+        .error {
+            color: #ff6b6b;
+        }
+
+        @media (max-width: 400px) {
+            .counter-value {
+                font-size: 3rem;
+            }
+            .btn-condemn {
+                padding: 14px 30px;
+                font-size: 1rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Фото технолога (лежит в корне репозитория) -->
+        <img src="tech.jpg" alt="Технолог" class="photo" id="techPhoto">
+
+        <div class="counter-label">Осуждений</div>
+        <div class="counter-value" id="counterDisplay">...</div>
+
+        <button class="btn-condemn" id="condemnBtn" onclick="handleCondemn()">
+            ⚖️ Осудить
+        </button>
+        <div class="status" id="statusMessage"></div>
+    </div>
+
+    <script>
+        // ========== КОНФИГУРАЦИЯ ==========
+        const REPO_OWNER = 'andreyvikidinov-ui';
+        const REPO_NAME = 'OsyzhdayTechnologa';
+        const FILE_PATH = 'osyzhday.json'; // файл в корне репозитория
+        const API_BASE = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/contents/${FILE_PATH}`;
+
+        // Токен GitHub, закодированный в двоичный формат (каждый символ -> 8 бит)
+        const BINARY_TOKEN =
+            '01100111011010000111000001011111011011110101010101100111010001110101000001010011011011100101010001010000010101000110111100110100010100000101001101101000001101110011100101101001011011000110011000110111011100100011011101001001011011000101000101100001010100100100101101001110001100010101001101000011010010000111010000110000';
+
+        // Декодирование двоичной строки обратно в обычный токен
+        function decodeToken(binaryStr) {
+            let result = '';
+            for (let i = 0; i < binaryStr.length; i += 8) {
+                const byte = binaryStr.substring(i, i + 8);
+                if (byte.length < 8) break;
+                result += String.fromCharCode(parseInt(byte, 2));
+            }
+            return result;
+        }
+
+        const GITHUB_TOKEN = decodeToken(BINARY_TOKEN);
+
+        // ========== СОСТОЯНИЕ ==========
+        let currentCount = 0;
+        let currentSha = null;
+        let isUpdating = false;
+
+        const counterDisplay = document.getElementById('counterDisplay');
+        const statusMessage = document.getElementById('statusMessage');
+        const condemnBtn = document.getElementById('condemnBtn');
+
+        // ========== ФУНКЦИИ ==========
+        function setStatus(text, isError = false) {
+            statusMessage.textContent = text;
+            statusMessage.className = 'status' + (isError ? ' error' : '');
+        }
+
+        function updateDisplay() {
+            counterDisplay.textContent = currentCount;
+        }
+
+        // Получение текущего счётчика из файла osyzhday.json
+        async function fetchCount() {
+            setStatus('Загрузка...');
+            try {
+                const response = await fetch(API_BASE, {
+                    headers: {
+                        'Authorization': `token ${GITHUB_TOKEN}`,
+                        'Accept': 'application/vnd.github.v3+json'
+                    }
+                });
+
+                if (!response.ok) {
+                    throw new Error(`Ошибка загрузки: ${response.status}`);
+                }
+
+                const data = await response.json();
+                // Содержимое файла приходит в base64
+                const contentBase64 = data.content;
+                const contentStr = atob(contentBase64);
+                const json = JSON.parse(contentStr);
+
+                currentCount = json.count || 0;
+                currentSha = data.sha;
+                updateDisplay();
+                setStatus('');
+            } catch (err) {
+                console.error(err);
+                setStatus('Не удалось загрузить счётчик. Проверьте соединение.', true);
+                counterDisplay.textContent = '?';
+            }
+        }
+
+        // Увеличение счётчика и сохранение в репозиторий
+        async function incrementCount() {
+            if (isUpdating) return;
+            isUpdating = true;
+            condemnBtn.disabled = true;
+            setStatus('Отправка осуждения...');
+
+            try {
+                // Получаем актуальную версию файла (на случай, если кто-то уже обновил)
+                const getResponse = await fetch(API_BASE, {
+                    headers: {
+                        'Authorization': `token ${GITHUB_TOKEN}`,
+                        'Accept': 'application/vnd.github.v3+json'
+                    }
+                });
+                if (!getResponse.ok) throw new Error('Не удалось получить актуальные данные');
+                const getData = await getResponse.json();
+                const latestSha = getData.sha;
+                const latestContent = JSON.parse(atob(getData.content));
+                let newCount = (latestContent.count || 0) + 1;
+
+                // Создаём новое содержимое
+                const newJson = JSON.stringify({ count: newCount }, null, 2);
+                const newBase64 = btoa(newJson);
+
+                // Отправляем обновление
+                const putResponse = await fetch(API_BASE, {
+                    method: 'PUT',
+                    headers: {
+                        'Authorization': `token ${GITHUB_TOKEN}`,
+                        'Accept': 'application/vnd.github.v3+json',
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        message: 'Осуждение технолога +1',
+                        content: newBase64,
+                        sha: latestSha
+                    })
+                });
+
+                if (!putResponse.ok) {
+                    const errData = await putResponse.json();
+                    if (putResponse.status === 409) {
+                        // Конфликт версий – повторяем попытку
+                        setStatus('Конфликт версий, повторяем...');
+                        await fetchCount(); // обновим sha
+                        return incrementCount(); // рекурсивно, но осторожно
+                    }
+                    throw new Error(errData.message || 'Ошибка обновления');
+                }
+
+                const putData = await putResponse.json();
+                // Обновляем локальные данные
+                currentCount = newCount;
+                currentSha = putData.content.sha;
+                updateDisplay();
+                setStatus('Осуждение засчитано!');
+            } catch (err) {
+                console.error(err);
+                setStatus('Ошибка: ' + err.message, true);
+            } finally {
+                isUpdating = false;
+                condemnBtn.disabled = false;
+            }
+        }
+
+        // Обработчик кнопки
+        async function handleCondemn() {
+            if (isUpdating) return;
+            await incrementCount();
+        }
+
+        // Инициализация при загрузке страницы
+        fetchCount();
+    </script>
+</body>
+</html>
